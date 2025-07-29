@@ -25,15 +25,21 @@ const setupQueue = () => {
 };
 
 const setupJobQueue = () => {
+  console.log('Setting up job queue...');
+  
   // Create job queue
   jobQueue = new Queue('repo-verification', {
     connection: redisClient
   });
+  
+  console.log('Job queue created:', jobQueue);
 
   // Create worker
   jobWorker = new Worker('repo-verification', async (job) => {
     const { repoUrl, submissionId, jobId } = job.data;
     const { processRepository } = require('./processor');
+    
+    console.log(`Worker starting to process job ${jobId} for repo: ${repoUrl}`);
     
     try {
       console.log(`Processing job ${jobId} for repo: ${repoUrl}`);
@@ -43,6 +49,8 @@ const setupJobQueue = () => {
       
       // Process the repository
       const result = await processRepository(repoUrl, jobId);
+      
+      console.log(`Job ${jobId} processing completed with result:`, result);
       
       // Update job with results
       await updateJobResult(jobId, result);
@@ -65,6 +73,8 @@ const setupJobQueue = () => {
     connection: redisClient,
     concurrency: 2 // Process 2 jobs at a time
   });
+  
+  console.log('Worker created:', jobWorker);
 
   // Handle worker events
   jobWorker.on('completed', (job) => {
@@ -74,29 +84,43 @@ const setupJobQueue = () => {
   jobWorker.on('failed', (job, err) => {
     console.error(`Job ${job.id} failed:`, err);
   });
+  
+  jobWorker.on('error', (err) => {
+    console.error('Worker error:', err);
+  });
 
   console.log('Job queue and worker setup complete');
 };
 
 const addJob = async (repoUrl, submissionId, jobId) => {
   if (!jobQueue) {
+    console.error('Job queue not initialized');
     throw new Error('Job queue not initialized');
   }
 
-  const job = await jobQueue.add('verify-repo', {
-    repoUrl,
-    submissionId,
-    jobId
-  }, {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000
-    },
-    timeout: 5 * 60 * 1000 // 5 minutes
-  });
+  console.log(`Adding job to queue: ${jobId} for repo: ${repoUrl}`);
+  console.log(`Queue object:`, jobQueue);
+  
+  try {
+    const job = await jobQueue.add('verify-repo', {
+      repoUrl,
+      submissionId,
+      jobId
+    }, {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000
+      },
+      timeout: 5 * 60 * 1000 // 5 minutes
+    });
 
-  return job;
+    console.log(`Job added to queue successfully: ${job.id}`);
+    return job;
+  } catch (error) {
+    console.error(`Error adding job to queue: ${jobId}`, error);
+    throw error;
+  }
 };
 
 const getJobStatus = async (jobId) => {
